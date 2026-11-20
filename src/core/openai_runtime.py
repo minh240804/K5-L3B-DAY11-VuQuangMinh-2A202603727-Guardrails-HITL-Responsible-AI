@@ -8,6 +8,7 @@ Gemini Red Team dùng Google ADK trong agents/*.py — không đi qua file này.
 """
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -31,6 +32,10 @@ class OpenAIAgent:
 @dataclass
 class _MockInvocationContext:
     user_id: str = "student"
+
+
+class ProviderUnavailableError(RuntimeError):
+    """The model provider could not serve a request after a bounded retry."""
 
 
 @dataclass
@@ -62,14 +67,48 @@ class OpenAIRunner:
             return block_msg
 
         client = self._client()
-        completion = client.chat.completions.create(
-            model=self.model,
-            messages=[
-                {"role": "system", "content": agent.instruction},
-                {"role": "user", "content": user_message},
-            ],
-            temperature=self.temperature,
-        )
+        from openai import APIConnectionError, InternalServerError, RateLimitError
+
+        messages = [
+            {"role": "system", "content": agent.instruction},
+            {"role": "user", "content": user_message},
+        ]
+        attempts = 2 if self.provider == "openrouter" else 1
+        for attempt in range(attempts):
+            try:
+                completion = client.chat.completions.create(
+                    model=self.model,
+                    messages=messages,
+                    temperature=self.temperature,
+                )
+                break
+            except (RateLimitError, InternalServerError, APIConnectionError) as exc:
+                if self.provider != "openrouter":
+                    raise
+                status = getattr(exc, "status_code", None)
+                label = str(status) if status else "connection error"
+                retry_after = None
+                response = getattr(exc, "response", None)
+                if response is not None:
+                    raw = response.headers.get("retry-after")
+                    try:
+                        retry_after = float(raw) if raw else None
+                    except ValueError:
+                        pass
+                if attempt + 1 == attempts or (retry_after or 0) > 15:
+                    detail = (
+                        f"OpenRouter Blue trả lỗi {label}. "
+                        "Kiểm tra giới hạn/quota của model miễn phí rồi chạy lại CP3."
+                    )
+                    if retry_after:
+                        detail += f" Provider yêu cầu đợi khoảng {retry_after:g} giây."
+                    raise ProviderUnavailableError(detail) from exc
+                delay = max(2.0, retry_after or 5.0)
+                print(
+                    f"OpenRouter Blue lỗi {label}; thử lại sau {delay:g} giây...",
+                    flush=True,
+                )
+                await asyncio.sleep(delay)
         text = (completion.choices[0].message.content or "").strip()
 
         for hook in self.output_hooks:

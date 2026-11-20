@@ -62,6 +62,7 @@ async def part3_assignment_suite():
         build_observability,
         run_assignment_suite,
     )
+    from core.openai_runtime import ProviderUnavailableError
 
     try:
         plugins = build_production_plugins(use_llm_judge=False)
@@ -78,6 +79,10 @@ async def part3_assignment_suite():
             "  python src/main.py --part 3"
         )
         print(f"Detail: {e}")
+        return None
+    except ProviderUnavailableError as e:
+        print(f"Checkpoint 3 chưa hoàn tất: {e}")
+        print("Chưa tạo outputs/results.json; chạy lại khi OpenRouter phục vụ model.")
         return None
 
 
@@ -143,7 +148,8 @@ async def main(parts=None):
         if part == 2:
             await part2_guardrails()
         elif part == 3:
-            await part3_assignment_suite()
+            if await part3_assignment_suite() is None:
+                return False
         elif part == 4:
             await part4_attacks()
         else:
@@ -152,6 +158,7 @@ async def main(parts=None):
     print("\n" + "=" * 60)
     print("Lab 11 complete! Check your results above.")
     print("=" * 60)
+    return True
 
 
 if __name__ == "__main__":
@@ -170,6 +177,8 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.part:
-        asyncio.run(main(parts=[args.part]))
+        succeeded = asyncio.run(main(parts=[args.part]))
     else:
-        asyncio.run(main())
+        succeeded = asyncio.run(main())
+    if not succeeded:
+        raise SystemExit(1)

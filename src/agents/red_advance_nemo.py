@@ -38,6 +38,7 @@ from core.config import (
     DEMO_SECRETS,
     PROVIDER_GEMINI,
     get_red_model,
+    get_red_openai_base_url,
     get_red_provider,
 )
 
@@ -237,12 +238,16 @@ def _model_entry(provider: str, model: str) -> dict:
             "api_key_env_var": "GOOGLE_API_KEY",
             "parameters": {"base_url": GEMINI_OPENAI_BASE_URL},
         }
-    return {
+    entry = {
         "type": "main",
         "engine": "openai",
         "model": model,
         "api_key_env_var": "OPENAI_API_KEY",
     }
+    base_url = get_red_openai_base_url()
+    if base_url:
+        entry["parameters"] = {"base_url": base_url}
+    return entry
 
 
 def build_rails_dict(
